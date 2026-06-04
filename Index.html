@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DamStab — Gravity Dam Stability</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,sans-serif;font-size:14px;color:#1a1a1a;background:#f5f5f3}
+.app{max-width:960px;margin:0 auto;padding:1rem}
+header{display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;padding-bottom:1rem;border-bottom:1px solid #e0e0e0}
+.logo{font-size:18px;font-weight:600}
+.logo-sub{font-size:12px;color:#888;margin-top:2px}
+.tabs{display:flex;gap:2px;border-bottom:1px solid #e0e0e0;margin-bottom:1.5rem}
+.tab{padding:8px 16px;cursor:pointer;border:none;border-bottom:2px solid transparent;font-size:13px;color:#666;background:none}
+.tab.active{color:#1a1a1a;border-bottom:2px solid #1a1a1a;font-weight:500}
+.panel{display:none}.panel.active{display:block}
+.card{background:#fff;border:1px solid #e8e8e8;border-radius:10px;padding:1rem 1.25rem;margin-bottom:1rem}
+.stitle{font-size:14px;font-weight:600;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid #f0f0f0;color:#333}
+.f2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px}
+.f3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:10px}
+label{display:block;font-size:11px;color:#888;margin-bottom:3px}
+input[type=number],input[type=text],input[type=password],select{width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:6px;background:#fff;color:#1a1a1a;font-size:13px}
+input:focus,select:focus{outline:none;border-color:#888}
+.btn{padding:8px 16px;border:1px solid #ccc;border-radius:6px;background:#fff;color:#1a1a1a;cursor:pointer;font-size:13px}
+.btn:hover{background:#f5f5f5}
+.btn-p{background:#1a1a1a;color:#fff;border-color:#1a1a1a}
+.btn-p:hover{background:#333}
+.btn-p:disabled{opacity:0.4;cursor:not-allowed}
+.btn-full{width:100%;margin-bottom:8px}
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:1rem}
+.metric{background:#f9f9f9;border-radius:8px;padding:12px;text-align:center}
+.mlabel{font-size:11px;color:#888;margin-bottom:4px}
+.mval{font-size:20px;font-weight:600}
+.ok{color:#1a7a3a}.fail{color:#c0392b}.warn{color:#b35c00}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{background:#f5f5f5;padding:6px 10px;text-align:left;font-weight:600;font-size:11px;color:#666}
+td{padding:6px 10px;border-bottom:1px solid #f0f0f0}
+.badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:500}
+.b-ok{background:#e8f5e9;color:#1a7a3a}.b-fail{background:#fdecea;color:#c0392b}
+.b-warn{background:#fff3e0;color:#b35c00}.b-info{background:#e3f2fd;color:#0c447c}
+.ctabs{display:flex;gap:6px;margin-bottom:1rem;flex-wrap:wrap}
+.ctab{padding:5px 12px;border:1px solid #ccc;border-radius:20px;cursor:pointer;font-size:12px;background:#fff}
+.ctab.active{background:#1a1a1a;color:#fff;border-color:#1a1a1a}
+.note{font-size:11px;color:#888;margin-top:4px;line-height:1.5}
+.drop{border:2px dashed #ccc;border-radius:10px;padding:2rem;text-align:center;cursor:pointer;margin-bottom:12px;transition:background .15s}
+.drop:hover,.drop.drag{background:#f9f9f9}
+.spinner{display:inline-block;width:13px;height:13px;border:2px solid #ccc;border-top-color:#333;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle}
+@keyframes spin{to{transform:rotate(360deg)}}
+.sbar{padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:12px;line-height:1.5}
+.s-ok{background:#e8f5e9;color:#1a7a3a}.s-err{background:#fdecea;color:#c0392b}
+.s-info{background:#e3f2fd;color:#0c447c}.s-warn{background:#fff3e0;color:#b35c00}
+.ef{display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #f0f0f0;font-size:12px}
+.ef:last-child{border-bottom:none}
+canvas{display:block;width:100%;border:1px solid #e8e8e8;border-radius:8px;margin-bottom:6px}
+@media(max-width:600px){.f2,.f3{grid-template-columns:1fr}.metrics{grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body>
+<div class="app">
+<header>
+  <div><div class="logo">DamStab</div><div class="logo-sub">Gravity dam stability screening</div></div>
+  <div style="display:flex;gap:8px">
+    <button class="btn" onclick="switchTab('settings',4)">⚙ Settings</button>
+    <button class="btn btn-p" onclick="runAll()">Run analysis</button>
+  </div>
+</header>
+
+<div class="tabs">
+  <button class="tab active" onclick="switchTab('image',0)">Image</button>
+  <button class="tab" onclick="switchTab('input',1)">Input</button>
+  <button class="tab" onclick="switchTab('forces',2)">Forces</button>
+  <button class="tab" onclick="switchTab('results',3)">Results</button>
+  <button class="tab" onclick="switchTab('settings',4)">Settings</button>
+</div>
+
+<!-- IMAGE -->
+<div id="panel-image" class="panel active">
+  <div class="card">
+    <div class="stitle">Upload cross-section drawing</div>
+    <div class="drop" id="drop" onclick="document.getElementById('fInput').click()"
+         ondragover="event.preventDefault();this.classList.add('drag')"
+         ondragleave="this.classList.remove('drag')"
+         ondrop="onDrop(event)">
+      <input type="file" id="fInput" accept="image/*" style="display:none" onchange="onFile(this.files[0])">
+      <div style="font-size:32px;color:#ccc">⬆</div>
+      <div style="margin-top:8px;font-size:13px;color:#888">Click or drag an image here</div>
+      <div class="note">PNG, JPG, or screenshot of any dam/wall cross-section</div>
+    </div>
+    <img id="prevImg" alt="Cross-section" style="display:none;max-width:100%;max-height:340px;border-radius:8px;margin-bottom:12px;border:1px solid #e8e8e8">
+    <div id="vStatus" style="display:none"></div>
+    <button id="readBtn" class="btn btn-p btn-full" style="display:none" onclick="doVision()" disabled>Read with AI vision</button>
+    <div id="exList" style="display:none;margin-top:12px">
+      <div style="font-weight:600;font-size:13px;margin-bottom:8px">Extracted values — review then apply</div>
+      <div id="exFields"></div>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button class="btn btn-p" onclick="applyEx()">Apply to input fields</button>
+        <button class="btn" onclick="document.getElementById('exList').style.display='none'">Dismiss</button>
+      </div>
+    </div>
+  </div>
+  <div class="card" style="background:#fafafa">
+    <div style="font-size:13px;font-weight:600;margin-bottom:6px">How it works</div>
+    <div class="note">
+      1. Upload a photo or screenshot of a dam or wall cross-section.<br>
+      2. Click "Read with AI vision" — the image is sent to Claude, which reads the section shape, dimensions, elevations, soil parameters, and drain info.<br>
+      3. Extracted values appear below. Click "Apply to input fields" to pre-fill the Input tab — then correct anything misread.<br>
+      4. Add your Anthropic API key in Settings to enable the vision button. Without a key the app still works fully — just fill Input manually.
+    </div>
+  </div>
+</div>
+
+<!-- INPUT -->
+<div id="panel-input" class="panel">
+  <div class="card">
+    <div class="stitle">Geometry &amp; section</div>
+    <div class="f3">
+      <div><label>Dam height (ft)</label><input type="number" id="H" value="60"></div>
+      <div><label>Base width (ft)</label><input type="number" id="B" value="45"></div>
+      <div><label>Crest offset / top width (ft)</label><input type="number" id="A" value="6"></div>
+    </div>
+    <div class="f2">
+      <div><label>Concrete unit weight (pcf)</label><input type="number" id="gc" value="150"></div>
+      <div><label>Dam weight per foot override (lb/ft) — 0 to compute from geometry</label><input type="number" id="Wo" value="0"></div>
+    </div>
+    <div id="cwt" class="note"></div>
+  </div>
+
+  <div class="card">
+    <div class="stitle">Elevations</div>
+    <div class="f3">
+      <div><label>Head water elevation (ft)</label><input type="number" id="HW" value="58"></div>
+      <div><label>Tail water elevation (ft)</label><input type="number" id="TW" value="5"></div>
+      <div><label>Flood elevation (ft)</label><input type="number" id="FE" value="60"></div>
+    </div>
+    <div class="f3">
+      <div><label>Dam crest elevation (ft)</label><input type="number" id="crest" value="60"></div>
+      <div><label>Base / foundation elevation (ft)</label><input type="number" id="baseEl" value="0"></div>
+      <div><label>Water unit weight (pcf)</label><input type="number" id="gw" value="62.4"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="stitle">Foundation</div>
+    <div class="f3">
+      <div><label>Friction angle φ (deg)</label><input type="number" id="phi" value="40"></div>
+      <div><label>Cohesion c (psf)</label><input type="number" id="coh" value="0"></div>
+      <div style="display:flex;align-items:flex-end;padding-bottom:4px">
+        <label style="display:flex;align-items:center;gap:6px;margin:0"><input type="checkbox" id="useCoh"> Include cohesion</label>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="stitle">Drain</div>
+    <div class="f3">
+      <div style="display:flex;align-items:flex-end;padding-bottom:4px">
+        <label style="display:flex;align-items:center;gap:6px;margin:0"><input type="checkbox" id="drainOn" checked> Drain present</label>
+      </div>
+      <div><label>Drain distance from heel (ft)</label><input type="number" id="drainX" value="10"></div>
+      <div><label>Drain efficiency E (0–1)</label><input type="number" id="drainE" value="0.5" step="0.05"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="stitle">Load cases</div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
+      <div style="padding:10px;border:1px solid #e8e8e8;border-radius:8px">
+        <div style="font-weight:600;margin-bottom:8px;font-size:12px">Usual — normal pool</div>
+        <label>Headwater El</label><input type="number" id="c0hw" value="58">
+        <label style="margin-top:6px">Tailwater El</label><input type="number" id="c0tw" value="5">
+        <label style="margin-top:6px">kh seismic</label><input type="number" id="c0kh" value="0" step="0.01">
+      </div>
+      <div style="padding:10px;border:1px solid #e8e8e8;border-radius:8px">
+        <div style="font-weight:600;margin-bottom:8px;font-size:12px">Unusual — flood</div>
+        <label>Headwater El</label><input type="number" id="c1hw" value="60">
+        <label style="margin-top:6px">Tailwater El</label><input type="number" id="c1tw" value="12">
+        <label style="margin-top:6px">kh seismic</label><input type="number" id="c1kh" value="0" step="0.01">
+      </div>
+      <div style="padding:10px;border:1px solid #e8e8e8;border-radius:8px">
+        <div style="font-weight:600;margin-bottom:8px;font-size:12px">Extreme — seismic</div>
+        <label>Headwater El</label><input type="number" id="c2hw" value="58">
+        <label style="margin-top:6px">Tailwater El</label><input type="number" id="c2tw" value="5">
+        <label style="margin-top:6px">kh seismic</label><input type="number" id="c2kh" value="0.10" step="0.01">
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="stitle">Design code</div>
+    <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:8px">
+      <label style="display:flex;align-items:center;gap:6px"><input type="radio" name="code" value="ferc" checked> FERC Ch.3</label>
+      <label style="display:flex;align-items:center;gap:6px"><input type="radio" name="code" value="usace"> USACE EM 1110-2-2100</label>
+      <label style="display:flex;align-items:center;gap:6px"><input type="radio" name="code" value="usbr"> USBR</label>
+    </div>
+    <div id="codeNote" class="note"></div>
+  </div>
+
+  <button class="btn btn-p btn-full" onclick="runAll();switchTab('results',3)">Run analysis →</button>
+</div>
+
+<!-- FORCES -->
+<div id="panel-forces" class="panel">
+  <div class="ctabs" id="ftabs"></div>
+  <canvas id="sCanvas" height="280"></canvas>
+  <div class="note" style="margin-bottom:1rem">W=weight (green↓) · Hu/Hd=hydrostatic (blue) · U=uplift (red↑) · Eq=seismic (purple) · R=resultant (orange)</div>
+  <div id="ftable"></div>
+</div>
+
+<!-- RESULTS -->
+<div id="panel-results" class="panel">
+  <div class="ctabs" id="rtabs"></div>
+  <div id="rarea"></div>
+  <div style="margin-top:1rem">
+    <button class="btn" onclick="exportCSV()">⬇ Export CSV</button>
+  </div>
+</div>
+
+<!-- SETTINGS -->
+<div id="panel-settings" class="panel">
+  <div class="card">
+    <div class="stitle">Anthropic API key</div>
+    <p class="note" style="margin-bottom:12px">Required for AI vision extraction. Stored in browser memory this session only — sent directly to api.anthropic.com, nowhere else. Get a key at <a href="https://console.anthropic.com" target="_blank" style="color:#0c447c">console.anthropic.com</a>.</p>
+    <div class="f2">
+      <div><label>API key</label><input type="password" id="keyIn" placeholder="sk-ant-..."></div>
+      <div><label>Model</label>
+        <select id="modelSel">
+          <option value="claude-sonnet-4-6">Sonnet 4.6 — balanced (recommended)</option>
+          <option value="claude-opus-4-8">Opus 4.8 — most capable</option>
+          <option value="claude-haiku-4-5-20251001">Haiku 4.5 — fastest / cheapest</option>
+        </select>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button class="btn btn-p" onclick="saveKey()">Save key</button>
+      <button class="btn" onclick="clearKey()">Clear</button>
+    </div>
+    <div id="kstat" class="note" style="margin-top:8px"></div>
+  </div>
+</div>
+</div>
+
+<script>
+const CODES={
+  ferc:{name:'FERC Ch.3',note:'Sliding FS: 3.0 (with cohesion)/1.5 (without) usual. Overturning by resultant location — no Mr/Mo ratio used.',usual:{fsC:3.0,fs:1.5,useOT:false},unusual:{fsC:2.0,fs:1.25,useOT:false},extreme:{fsC:1.3,fs:1.1,useOT:false}},
+  usace:{name:'USACE EM 1110-2-2100',note:'Sliding FS by load condition. Overturning via resultant location and eccentricity.',usual:{fsC:2.0,fs:2.0,useOT:false},unusual:{fsC:1.7,fs:1.7,useOT:false},extreme:{fsC:1.3,fs:1.3,useOT:false}},
+  usbr:{name:'USBR Gravity Dams',note:'Shear-friction FS ~3.0 usual. Mr/Mo overturning ratio computed.',usual:{fsC:3.0,fs:3.0,useOT:true,minOT:2.0},unusual:{fsC:2.0,fs:2.0,useOT:true,minOT:1.5},extreme:{fsC:1.0,fs:1.0,useOT:true,minOT:1.1}}
+};
+let apiKey='',apiModel='claude-sonnet-4-6',imgData=null,exData=null,results=[];
+
+function g(id){return parseFloat(document.getElementById(id).value)||0}
+function gi(id){return document.getElementById(id).checked}
+function sv(id,v){const e=document.getElementById(id);if(e)e.value=v}
+
+function switchTab(name,idx){
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.getElementById('panel-'+name).classList.add('active');
+  document.querySelectorAll('.tab')[idx].classList.add('active');
+}
+
+function saveKey(){
+  apiKey=document.getElementById('keyIn').value.trim();
+  apiModel=document.getElementById('modelSel').value;
+  const s=document.getElementById('kstat');
+  s.textContent=apiKey?'Key saved for this session.':'No key entered.';
+  s.style.color=apiKey?'#1a7a3a':'#888';
+  updateReadBtn();
+}
+function clearKey(){apiKey='';sv('keyIn','');document.getElementById('kstat').textContent='Cleared.';updateReadBtn();}
+function updateReadBtn(){
+  const b=document.getElementById('readBtn');if(!b)return;
+  b.disabled=!(imgData&&apiKey);
+  if(imgData&&!apiKey)showVS('Add your API key in Settings to enable AI vision reading.','warn');
+}
+
+function onFile(file){
+  if(!file||!file.type.startsWith('image/'))return;
+  const r=new FileReader();
+  r.onload=e=>{
+    imgData=e.target.result;
+    const img=document.getElementById('prevImg');img.src=imgData;img.style.display='block';
+    document.getElementById('readBtn').style.display='block';
+    document.getElementById('vStatus').style.display='block';
+    showVS('Image loaded. Click "Read with AI vision" to extract parameters.','info');
+    updateReadBtn();
+  };r.readAsDataURL(file);
+}
+function onDrop(e){e.preventDefault();document.getElementById('drop').classList.remove('drag');const f=e.dataTransfer.files[0];if(f)onFile(f);}
+
+function showVS(msg,type){const e=document.getElementById('vStatus');if(!e)return;e.style.display='block';e.className='sbar s-'+type;e.innerHTML=msg;}
+
+async function doVision(){
+  if(!apiKey||!imgData)return;
+  showVS('<span class="spinner"></span> Sending to Claude — reading section geometry, elevations, and parameters…','info');
+  document.getElementById('readBtn').disabled=true;
+  const b64=imgData.split(',')[1];
+  const mt=imgData.split(';')[0].split(':')[1]||'image/jpeg';
+  const prompt=`You are reading an engineering cross-section drawing of a dam or retaining wall.
+Return ONLY a JSON object — no prose, no markdown fences.
+
+x increases from upstream heel to downstream toe. y is elevation upward. Units: feet.
+Use dimension labels in the drawing for real coordinates. If no dimensions shown, set confidence "low".
+
+JSON schema (null for values you cannot read):
+{
+  "vertices": [[x,y],...],
+  "scalars": {
+    "headwater":null,"tailwater":null,"flood":null,"crest":null,"base":null,
+    "damHeight":null,"baseWidth":null,"topWidth":null,"concreteUW":null,
+    "friction":null,"cohesion":null,"drainDist":null,"drainEff":null
+  },
+  "confidence":"high|medium|low",
+  "notes":"what you assumed or could not read"
+}`;
+  try{
+    const res=await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+      body:JSON.stringify({model:apiModel,max_tokens:1500,messages:[{role:'user',content:[
+        {type:'image',source:{type:'base64',media_type:mt,data:b64}},
+        {type:'text',text:prompt}
+      ]}]})
+    });
+    if(!res.ok){const err=await res.json();throw new Error(err.error?.message||res.status);}
+    const data=await res.json();
+    const raw=data.content.map(c=>c.type==='text'?c.text:'').join('').trim()
+      .replace(/^```json/,'').replace(/^```/,'').replace(/```$/,'').trim();
+    exData=JSON.parse(raw);
+    renderEx(exData);
+    showVS(`Read complete — confidence: <strong>${exData.confidence}</strong>.`+(exData.notes?`<br><em>${exData.notes}</em>`:''),'ok');
+  }catch(e){showVS(`Vision failed: ${e.message}. Check API key in Settings.`,'err');}
+  document.getElementById('readBtn').disabled=false;
+}
+
+const EL={headwater:'Head water elevation (ft)',tailwater:'Tail water elevation (ft)',flood:'Flood elevation (ft)',
+  crest:'Dam crest elevation (ft)',base:'Base/foundation elevation (ft)',damHeight:'Dam height (ft)',
+  baseWidth:'Base width (ft)',topWidth:'Crest/top width (ft)',concreteUW:'Concrete unit weight (pcf)',
+  friction:'Friction angle φ (deg)',cohesion:'Cohesion c (psf)',drainDist:'Drain dist from heel (ft)',drainEff:'Drain efficiency E'};
+
+function polyArea(v){let a=0;for(let i=0;i<v.length;i++){const j=(i+1)%v.length;a+=v[i][0]*v[j][1]-v[j][0]*v[i][1]}return Math.abs(a/2);}
+
+function renderEx(obj){
+  let h='';
+  if(obj.vertices&&obj.vertices.length>=3){
+    const a=polyArea(obj.vertices),uw=obj.scalars?.concreteUW||150,w=a*uw;
+    h+=`<div class="ef"><span class="badge b-info">geometry</span><span style="flex:1">${obj.vertices.length} vertices · area ≈ ${a.toFixed(1)} ft² · weight ≈ ${Math.round(w).toLocaleString()} lb/ft</span></div>`;
+  }
+  Object.entries(obj.scalars||{}).forEach(([k,v])=>{
+    if(v==null)return;
+    h+=`<div class="ef"><span class="badge b-info">value</span><span style="flex:1;color:#888">${EL[k]||k}</span><strong>${typeof v==='number'?v.toFixed(2):v}</strong></div>`;
+  });
+  if(!h)h='<div class="note">No values extracted. Try a clearer image with labeled dimensions.</div>';
+  document.getElementById('exFields').innerHTML=h;
+  document.getElementById('exList').style.display='block';
+}
+
+function applyEx(){
+  if(!exData)return;
+  const s=exData.scalars||{};
+  if(s.headwater!=null){sv('HW',s.headwater);sv('c0hw',s.headwater);sv('c2hw',s.headwater);}
+  if(s.tailwater!=null){sv('TW',s.tailwater);sv('c0tw',s.tailwater);sv('c2tw',s.tailwater);}
+  if(s.flood!=null){sv('FE',s.flood);sv('c1hw',s.flood);}
+  if(s.crest!=null)sv('crest',s.crest);
+  if(s.base!=null)sv('baseEl',s.base);
+  if(s.damHeight!=null)sv('H',s.damHeight);
+  if(s.baseWidth!=null)sv('B',s.baseWidth);
+  if(s.topWidth!=null)sv('A',s.topWidth);
+  if(s.concreteUW!=null)sv('gc',s.concreteUW);
+  if(s.friction!=null)sv('phi',s.friction);
+  if(s.cohesion!=null)sv('coh',s.cohesion);
+  if(s.drainDist!=null)sv('drainX',s.drainDist);
+  if(s.drainEff!=null)sv('drainE',s.drainEff);
+  if(exData.vertices&&exData.vertices.length>=3){
+    const verts=exData.vertices;
+    const maxX=Math.max(...verts.map(v=>v[0])),maxY=Math.max(...verts.map(v=>v[1]));
+    const minY=Math.min(...verts.map(v=>v[1]));
+    sv('H',(maxY-minY).toFixed(1));sv('B',maxX.toFixed(1));
+  }
+  updCW();showVS('Applied to Input tab. Review values, then run analysis.','ok');
+  switchTab('input',1);
+}
+
+function getSec(){
+  const H=g('H'),B=g('B'),A=g('A'),gc=g('gc');
+  const v=[[0,0],[B,0],[A,H],[0,H]];
+  let sa=0;v.forEach((pt,i)=>{const j=(i+1)%v.length;sa+=pt[0]*v[j][1]-v[j][0]*pt[1];});sa/=2;
+  const area=Math.abs(sa);let cx=0,cy=0,sa2=0;
+  v.forEach((pt,i)=>{const j=(i+1)%v.length;const cr=pt[0]*v[j][1]-v[j][0]*pt[1];cx+=(pt[0]+v[j][0])*cr;cy+=(pt[1]+v[j][1])*cr;sa2+=cr;});
+  sa2/=2;cx/=6*sa2;cy/=6*sa2;
+  const Wo=g('Wo'),W=Wo>0?Wo:area*gc;
+  return{v,area,cx,cy,W,H,B,A,gc,hx:0,tx:B};
+}
+function updCW(){const s=getSec();const e=document.getElementById('cwt');if(e)e.textContent=g('Wo')>0?`Override: ${Math.round(s.W).toLocaleString()} lb/ft`:`Computed: ${Math.round(s.W).toLocaleString()} lb/ft (${s.area.toFixed(1)} ft² × ${g('gc')} pcf)`;}
+
+function buildF(sec,hw,tw,kh,bEl,gw,don,dx,de,cl){
+  const{cx,cy,W,hx,tx}=sec,L=tx-hx,forces=[];
+  forces.push({lb:'Self weight (W)',fx:0,fy:W,x:cx,y:cy,nt:`W=${Math.round(W).toLocaleString()}`});
+  const hd=Math.max(0,hw-bEl);if(hd>0){const p=.5*gw*hd*hd;forces.push({lb:'Headwater (Hu)',fx:p,fy:0,x:hx,y:bEl+hd/3,nt:`h=${hd.toFixed(1)}`});}
+  const td=Math.max(0,tw-bEl);if(td>0){const p=.5*gw*td*td;forces.push({lb:'Tailwater (Hd)',fx:-p,fy:0,x:tx,y:bEl+td/3,nt:`h=${td.toFixed(1)}`});}
+  const pH=gw*Math.max(0,hw-bEl),pT=gw*Math.max(0,tw-bEl);
+  const cln=Math.max(0,Math.min(cl||0,L)),tip=hx+cln;
+  function tr(x1,x2,p1,p2,lb){const w=x2-x1;if(w<=0)return;const f=.5*(p1+p2)*w;const den=p1+p2;const xc=den>1e-9?x1+w*(p1+2*p2)/(3*den):(x1+x2)/2;forces.push({lb,fx:0,fy:-f,x:xc,y:0,nt:`p1=${p1.toFixed(0)} p2=${p2.toFixed(0)}`});}
+  if(cln>1e-9)tr(hx,tip,pH,pH,'Uplift on crack');
+  if(don&&dx>0&&de>0&&(dx+hx)>tip){const xd=dx+hx,sp=tx-tip,pLR=sp>1e-9?pH+(pT-pH)*(xd-tip)/sp:pT,pD=pT+(1-de)*(pLR-pT);tr(tip,xd,pH,pD,'Uplift heel→drain');tr(xd,tx,pD,pT,'Uplift drain→toe');}
+  else tr(tip,tx,pH,pT,cln>1e-9?'Uplift tip→toe':'Uplift (full)');
+  if(kh)forces.push({lb:'Seismic (Eq)',fx:kh*W,fy:0,x:cx,y:cy,nt:`kh=${kh}`});
+  return forces;
+}
+
+function calc(sec,forces,bEl,phi,coh,uc,cl){
+  const L=sec.tx-sec.hx,N=forces.reduce((s,f)=>s+f.fy,0),V=forces.reduce((s,f)=>s+f.fx,0);
+  const phiR=phi*Math.PI/180,fr=N>0?N*Math.tan(phiR):0;
+  const cln=Math.max(0,Math.min(cl||0,L)),cohR=uc?coh*(L-cln):0;
+  const FS=V>1e-9?(fr+cohR)/V:Infinity;
+  let res=0,drv=0;forces.forEach(f=>{const m=f.fy*(sec.tx-f.x)-f.fx*(f.y-bEl);m>=0?res+=m:drv+=-m;});
+  const OT=drv>1e-9?res/drv:Infinity;
+  const netM=forces.reduce((s,f)=>s+f.fy*(sec.tx-f.x)-f.fx*(f.y-bEl),0);
+  const arm=Math.abs(N)>1e-9?netM/N:L/2,fh=L-arm,e=fh-L/2,inT=Math.abs(e)<=L/6;
+  const sg=Math.max(0,Math.min(L,L-3*arm));
+  let maxP,minP;
+  if(cln>1e-9){const uc2=L-cln,b=Math.max(1e-9,Math.min(3*arm,uc2));maxP=N>0?2*N/b:0;minP=0;}
+  else{const sa=N/L,fc=6*e/L;maxP=Math.max(sa*(1+fc),sa*(1-fc));minP=Math.min(sa*(1+fc),sa*(1-fc));}
+  return{N,V,fr,cohR,FS,res,drv,OT,fh,e,inT,sg,maxP,minP,ten:minP<0,cln,L};
+}
+
+function runAll(){
+  const sec=getSec(),bEl=g('baseEl'),gw=g('gw'),don=gi('drainOn'),dx=g('drainX'),de=g('drainE');
+  const phi=g('phi'),coh=g('coh'),uc=gi('useCoh'),code=document.querySelector('input[name=code]:checked').value;
+  const n=document.getElementById('codeNote');if(n)n.textContent=CODES[code].note;
+  const cases=[{nm:'Usual — normal pool',hw:g('c0hw'),tw:g('c0tw'),kh:g('c0kh'),cd:'usual'},
+    {nm:'Unusual — flood',hw:g('c1hw'),tw:g('c1tw'),kh:g('c1kh'),cd:'unusual'},
+    {nm:'Extreme — seismic',hw:g('c2hw'),tw:g('c2tw'),kh:g('c2kh'),cd:'extreme'}];
+  results=cases.map(c=>{
+    const forces=buildF(sec,c.hw,c.tw,c.kh,bEl,gw,don,dx,de,0);
+    const r=calc(sec,forces,bEl,phi,coh,uc,0);
+    return{...c,forces,r,sec,crack:{on:false,len:0},code};
+  });
+  mkFTabs();mkRTabs();showF(0);showR(0);updCW();
+}
+
+function mkFTabs(){document.getElementById('ftabs').innerHTML=results.map((r,i)=>`<button class="ctab${i===0?' active':''}" onclick="selF(${i},this)">${r.nm}</button>`).join('');}
+function mkRTabs(){document.getElementById('rtabs').innerHTML=results.map((r,i)=>`<button class="ctab${i===0?' active':''}" onclick="selR(${i},this)">${r.nm}</button>`).join('');}
+function selF(i,b){b.parentNode.querySelectorAll('.ctab').forEach(x=>x.classList.remove('active'));b.classList.add('active');showF(i);}
+function selR(i,b){b.parentNode.querySelectorAll('.ctab').forEach(x=>x.classList.remove('active'));b.classList.add('active');showR(i);}
+
+function showF(idx){
+  const r=results[idx];if(!r)return;
+  drawSec(r.sec,r.forces,r.r,r.hw,g('baseEl'));
+  const sF=r.forces.reduce((s,f)=>s+f.fx,0),sV=r.forces.reduce((s,f)=>s+f.fy,0);
+  document.getElementById('ftable').innerHTML=`<table>
+  <thead><tr><th>Force</th><th>Fx lb/ft</th><th>Fy lb/ft</th><th>x ft</th><th>y ft</th><th>Note</th></tr></thead>
+  <tbody>${r.forces.map(f=>`<tr><td>${f.lb}</td><td>${fmtn(f.fx)}</td><td>${fmtn(f.fy)}</td><td>${f.x.toFixed(2)}</td><td>${f.y.toFixed(2)}</td><td style="color:#888">${f.nt}</td></tr>`).join('')}
+  <tr style="font-weight:600;background:#f5f5f5"><td>Σ Horizontal (driving)</td><td colspan="5">${fmtn(sF)} lb/ft</td></tr>
+  <tr style="font-weight:600;background:#f5f5f5"><td>Σ Vertical = N</td><td></td><td colspan="4">${fmtn(sV)} lb/ft</td></tr>
+  </tbody></table>`;
+}
+
+function showR(idx){
+  const r=results[idx];if(!r)return;
+  const crit=CODES[r.code][r.cd],reqFS=r.r.cohR>0?crit.fsC:crit.fs,ok=r.r.FS>=reqFS;
+  const otOk=!crit.useOT||r.r.OT>=(crit.minOT||0);
+  const fs=isFinite(r.r.FS)?r.r.FS.toFixed(2):'∞',ot=isFinite(r.r.OT)?r.r.OT.toFixed(2):'∞';
+  const cl=r.crack;
+  document.getElementById('rarea').innerHTML=`
+  <div class="card">
+    <div class="metrics">
+      <div class="metric"><div class="mlabel">Sliding FS</div><div class="mval ${ok?'ok':'fail'}">${fs}</div><div class="note">req ≥ ${reqFS}</div></div>
+      <div class="metric"><div class="mlabel">${crit.useOT?'OT Mr/Mo':'Resultant'}</div><div class="mval ${crit.useOT?(otOk?'ok':'fail'):(r.r.inT?'ok':'fail')}">${crit.useOT?ot:r.r.fh.toFixed(1)+' ft'}</div><div class="note">${crit.useOT?'req ≥ '+crit.minOT:r.r.inT?'middle-third ✓':'outside L/3'}</div></div>
+      <div class="metric"><div class="mlabel">Eccentricity</div><div class="mval ${r.r.inT?'ok':'warn'}">${r.r.e.toFixed(2)} ft</div><div class="note">L/6=${(r.r.L/6).toFixed(2)}</div></div>
+      <div class="metric"><div class="mlabel">Heel pressure</div><div class="mval ${r.r.ten?'fail':'ok'}">${Math.round(r.r.minP).toLocaleString()} psf</div><div class="note">${r.r.ten?'⚠ tension':'ok'}</div></div>
+    </div>
+    <table style="margin-bottom:12px">
+      <tbody>
+        <tr><td style="color:#888">Sliding FS</td><td>= (${Math.round(r.r.fr).toLocaleString()} + ${Math.round(r.r.cohR).toLocaleString()}) / ${Math.round(r.r.V).toLocaleString()} = <strong>${fs}</strong> <span class="badge ${ok?'b-ok':'b-fail'}">${ok?'OK':'NOT OK'}</span></td></tr>
+        <tr><td style="color:#888">Overturning</td><td>${crit.useOT?`Mr/Mo = ${ot} (req ≥ ${crit.minOT}) <span class="badge ${otOk?'b-ok':'b-fail'}">${otOk?'OK':'NOT OK'}</span>`:'Controlled by resultant location — code does not use Mr/Mo'}</td></tr>
+        <tr><td style="color:#888">Moments res / drv</td><td>${Math.round(r.r.res).toLocaleString()} / ${Math.round(r.r.drv).toLocaleString()} ft·lb/ft</td></tr>
+        <tr><td style="color:#888">Base pressure heel/toe</td><td>${Math.round(r.r.minP).toLocaleString()} / ${Math.round(r.r.maxP).toLocaleString()} psf ${r.r.ten?'<span class="badge b-warn">tension — cracked-base required</span>':''}</td></tr>
+        <tr><td style="color:#888">N effective / V driving</td><td>${Math.round(r.r.N).toLocaleString()} / ${Math.round(r.r.V).toLocaleString()} lb/ft</td></tr>
+      </tbody>
+    </table>
+    <div style="padding-top:12px;border-top:1px solid #f0f0f0">
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;margin-bottom:8px;cursor:pointer">
+        <input type="checkbox" id="ck-${idx}" ${cl.on?'checked':''} onchange="togCrack(${idx},this.checked)"> Cracked-base analysis
+      </label>
+      ${cl.on?`<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+        <label style="min-width:220px;font-size:12px">Assumed crack length from heel (ft)</label>
+        <input type="number" id="ckl-${idx}" value="${cl.len.toFixed(2)}" step="0.1" style="width:100px" onchange="setCL(${idx},parseFloat(this.value))">
+      </div>
+      <div class="note">Suggested: ${r.r.sg.toFixed(2)} ft · applied: ${cl.len.toFixed(2)} ft</div>
+      <button class="btn" style="margin-top:6px;font-size:12px" onclick="appSug(${idx})">Use suggested</button>
+      <div style="margin-top:6px;font-size:12px;color:${Math.abs(r.r.sg-cl.len)<0.1?'#1a7a3a':'#b35c00'}">${Math.abs(r.r.sg-cl.len)<0.1?'✓ Converged.':'Tap "Use suggested" to iterate.'}</div>`:''}
+    </div>
+  </div>
+  <div class="note">Preliminary screening only. A licensed engineer must verify all results. Code: ${CODES[r.code].name}</div>`;
+}
+
+function togCrack(i,on){if(!results[i])return;results[i].crack.on=on;rerun(i);}
+function setCL(i,l){if(!results[i])return;results[i].crack.len=l;rerun(i);}
+function appSug(i){if(!results[i])return;results[i].crack.len=results[i].r.sg;results[i].crack.on=true;rerun(i);}
+function rerun(i){
+  const r=results[i],sec=getSec(),bEl=g('baseEl'),gw=g('gw'),don=gi('drainOn'),dx=g('drainX'),de=g('drainE'),cl=r.crack.on?r.crack.len:0;
+  r.forces=buildF(sec,r.hw,r.tw,r.kh,bEl,gw,don,dx,de,cl);r.r=calc(sec,r.forces,bEl,g('phi'),g('coh'),gi('useCoh'),cl);r.sec=sec;
+  showR(i);showF(i);
+}
+
+function drawSec(sec,forces,res,hw,bEl){
+  const c=document.getElementById('sCanvas'),W2=c.offsetWidth||680;c.width=W2;c.height=280;
+  const ctx=c.getContext('2d');ctx.clearRect(0,0,W2,280);
+  const pad=56,v=sec.v,mxX=Math.max(...v.map(p=>p[0])),mxY=Math.max(...v.map(p=>p[1]));
+  const sx=(W2-2*pad)/Math.max(1,mxX),sy=(280-2*pad)/Math.max(1,mxY),s=Math.min(sx,sy);
+  const px=x=>pad+x*s,py=y=>280-pad-y*s;
+  ctx.fillStyle='rgba(100,170,255,0.12)';ctx.fillRect(0,py(Math.min(hw,mxY)),px(0),py(bEl)-py(Math.min(hw,mxY)));
+  ctx.beginPath();v.forEach((p,i)=>i===0?ctx.moveTo(px(p[0]),py(p[1])):ctx.lineTo(px(p[0]),py(p[1])));
+  ctx.closePath();ctx.fillStyle='rgba(180,180,180,0.25)';ctx.fill();ctx.strokeStyle='#555';ctx.lineWidth=2;ctx.stroke();
+  ctx.strokeStyle='#333';ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(px(0)-10,py(bEl));ctx.lineTo(px(mxX)+10,py(bEl));ctx.stroke();
+  const mxM=Math.max(1,...forces.map(f=>Math.hypot(f.fx,f.fy))),mxL=55;
+  const cm={W:'#2a9a3f',Hu:'#1a6cc7',Hd:'#1a6cc7',U:'#c0392b',Eq:'#7b2fbe'};
+  forces.forEach(f=>{
+    const mg=Math.hypot(f.fx,f.fy);if(mg<1e-6)return;
+    const ln=Math.max(14,mxL*Math.sqrt(mg/mxM)),ox=px(f.x),oy=py(Math.max(f.y,bEl));
+    const dx2=Math.abs(f.fx)>Math.abs(f.fy)?(f.fx>0?1:-1):0,dy2=Math.abs(f.fy)>=Math.abs(f.fx)?(f.fy>0?1:-1):0;
+    const ex=ox+dx2*ln,ey=oy+dy2*ln;
+    const sh=f.lb.startsWith('Self')?'W':f.lb.startsWith('Head')?'Hu':f.lb.startsWith('Tail')?'Hd':(f.lb.startsWith('Uplift')||f.lb.startsWith('Up'))?'U':'Eq';
+    const col=cm[sh]||'#888';ctx.strokeStyle=col;ctx.lineWidth=3;
+    ctx.beginPath();ctx.moveTo(ox,oy);ctx.lineTo(ex,ey);ctx.stroke();
+    const ah=8,px3=-dy2,py3=dx2;
+    ctx.beginPath();ctx.moveTo(ex,ey);ctx.lineTo(ex-dx2*ah+px3*ah*.6,ey-dy2*ah+py3*ah*.6);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(ex,ey);ctx.lineTo(ex-dx2*ah-px3*ah*.6,ey-dy2*ah-py3*ah*.6);ctx.stroke();
+    ctx.fillStyle=col;ctx.font='11px sans-serif';ctx.fillText(sh,ex+4,ey-3);
+  });
+  const rx=px(sec.hx+res.fh);ctx.strokeStyle='#e67e00';ctx.lineWidth=3;
+  ctx.beginPath();ctx.moveTo(rx,py(bEl)+3);ctx.lineTo(rx,py(bEl)+20);ctx.stroke();
+  ctx.fillStyle='#e67e00';ctx.font='bold 11px sans-serif';ctx.fillText('R',rx+3,py(bEl)+33);
+}
+
+function fmtn(v){const n=parseFloat(v);if(!isFinite(n))return'∞';return(n<0?'-':'')+Math.abs(n).toLocaleString(undefined,{maximumFractionDigits:0});}
+
+function exportCSV(){
+  if(!results.length){alert('Run analysis first.');return;}
+  const rows=[['Case','Sliding FS','Req FS','OK','Resultant ft','Eccentricity ft','Middle third','Heel psf','Toe psf','Tension','N lb/ft','V lb/ft']];
+  results.forEach(r=>{const crit=CODES[r.code][r.cd],req=r.r.cohR>0?crit.fsC:crit.fs;rows.push([r.nm,r.r.FS.toFixed(2),req,r.r.FS>=req?'OK':'FAIL',r.r.fh.toFixed(2),r.r.e.toFixed(2),r.r.inT?'Yes':'No',Math.round(r.r.minP),Math.round(r.r.maxP),r.r.ten?'Yes':'No',Math.round(r.r.N),Math.round(r.r.V)]);});
+  const a=document.createElement('a');a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(rows.map(r=>r.join(',')).join('\n'));a.download='DamStab_results.csv';a.click();
+}
+
+updCW();runAll();
+</script>
+</body>
+</html>
