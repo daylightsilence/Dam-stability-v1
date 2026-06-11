@@ -184,6 +184,7 @@ canvas{display:block;border:1px solid #e0e0e0;border-radius:8px;background:#fff}
           <button class="mode-btn" id="mb-move" onclick="setMode('move')">&#8662; Move Node</button>
           <button class="mode-btn" id="mb-del" onclick="setMode('delete')">&#10005; Delete Node</button>
           <button class="mode-btn" id="mb-scale" onclick="setMode('scale')">&#8596; Set Scale</button>
+          <button class="mode-btn" id="mb-datum" onclick="setMode('datum')">&#8213; Set Datum</button>
           <button class="btn btn-sm" onclick="clearAllNodes()" style="margin-left:auto">Clear All</button>
         </div>
         <div id="scaleStatus" class="note" style="margin-bottom:6px">Mode: Add Node — click canvas to place nodes</div>
@@ -435,9 +436,10 @@ const state = {
   scale: 1,           // ft per pixel
   unit: 'ft',
   baseElev: 0,
-  mode: 'add',        // add | move | delete | scale
+  mode: 'add',        // add | move | delete | scale | datum
   scalePoints: [],    // for set-scale mode
   dragging: null,     // index of node being dragged
+  datumPy: null,      // canvas pixel y of datum line (null = use bottom of canvas)
   results: [],
   analysisRan: false
 };
@@ -584,7 +586,8 @@ function setMode(m) {
     add: 'Mode: Add Node — click canvas to place nodes',
     move: 'Mode: Move Node — click and drag a node',
     delete: 'Mode: Delete Node — click a node to remove it',
-    scale: 'Mode: Set Scale — click two points, then enter real distance'
+    scale: 'Mode: Set Scale — click two points, then enter real distance',
+    datum: 'Mode: Set Datum — click anywhere to place the base elevation line (drag to reposition)'
   };
   document.getElementById('scaleStatus').textContent = msgs[m] || '';
   geoCanvas.style.cursor = m === 'move' ? 'grab' : 'crosshair';
@@ -611,6 +614,12 @@ function nearestNode(x, y, threshold = 15) {
 
 geoCanvas.addEventListener('mousedown', e => {
   const { x, y } = canvasXY(e);
+  // Allow dragging datum line from any mode if click is within 8px of it
+  const dpy = state.datumPy !== null ? state.datumPy : geoCanvas.height;
+  if (Math.abs(y - dpy) <= 8 && state.mode !== 'datum') {
+    state.dragging = 'datum';
+    return;
+  }
   if (state.mode === 'add') {
     if (state.nodes.length >= 50) { alert('Maximum 50 nodes reached.'); return; }
     state.nodes.push({ x, y });
@@ -628,6 +637,14 @@ geoCanvas.addEventListener('mousedown', e => {
       redrawGeoCanvas();
       updateNodeTable();
     }
+  } else if (state.mode === 'datum') {
+    state.datumPy = y;
+    state.dragging = 'datum';
+    computeRealNodes();
+    redrawGeoCanvas();
+    updateNodeTable();
+    document.getElementById('geoBaseElev').value = state.baseElev.toFixed(2);
+    document.getElementById('baseElev').value = state.baseElev.toFixed(2);
   } else if (state.mode === 'scale') {
     state.scalePoints.push({ x, y });
     redrawGeoCanvas();
@@ -652,12 +669,19 @@ geoCanvas.addEventListener('mousedown', e => {
 });
 
 geoCanvas.addEventListener('mousemove', e => {
-  if (state.mode === 'move' && state.dragging !== null) {
-    const { x, y } = canvasXY(e);
+  const { x, y } = canvasXY(e);
+  if (state.mode === 'move' && state.dragging !== null && state.dragging !== 'datum') {
     state.nodes[state.dragging] = { x, y };
     computeRealNodes();
     redrawGeoCanvas();
     updateNodeTable();
+  } else if (state.dragging === 'datum') {
+    state.datumPy = y;
+    computeRealNodes();
+    redrawGeoCanvas();
+    updateNodeTable();
+    document.getElementById('geoBaseElev').value = state.baseElev.toFixed(2);
+    document.getElementById('baseElev').value = state.baseElev.toFixed(2);
   }
 });
 
@@ -680,10 +704,11 @@ function clearAllNodes() {
 function computeRealNodes() {
   const canvas = document.getElementById('geoCanvas');
   const H = canvas.height;
-  // y pixel: 0=top, H=bottom. Real y: 0=bottom (base). Flip and scale.
+  // datum pixel y: where real baseElev lives on canvas (defaults to bottom)
+  const datumPy = state.datumPy !== null ? state.datumPy : H;
   state.realNodes = state.nodes.map(n => ({
     x: n.x * state.scale,
-    y: state.baseElev + (H - n.y) * state.scale
+    y: state.baseElev + (datumPy - n.y) * state.scale
   }));
   updateGeoInfo();
 }
@@ -738,6 +763,30 @@ function redrawGeoCanvas() {
     ctx.setLineDash([]);
   }
 
+  // Datum line
+  {
+    const datumPy = state.datumPy !== null ? state.datumPy : H;
+    ctx.save();
+    ctx.strokeStyle = '#e67e00';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([8, 5]);
+    ctx.beginPath();
+    ctx.moveTo(0, datumPy);
+    ctx.lineTo(W, datumPy);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#e67e00';
+    ctx.font = 'bold 11px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText('Base Elev = ' + state.baseElev.toFixed(1) + ' ' + state.unit, 6, datumPy - 4);
+    // Drag handle
+    ctx.beginPath();
+    ctx.arc(W - 16, datumPy, 7, 0, Math.PI * 2);
+    ctx.fillStyle = '#e67e00';
+    ctx.fill();
+    ctx.restore();
+  }
+
   if (state.nodes.length === 0) return;
 
   // Polygon
@@ -785,12 +834,13 @@ function updateNodeFromTable(i, axis, val) {
   if (!isFinite(val)) return;
   const canvas = document.getElementById('geoCanvas');
   const H = canvas.height;
+  const datumPy = state.datumPy !== null ? state.datumPy : H;
   if (axis === 'x') {
     state.realNodes[i].x = val;
     state.nodes[i].x = val / state.scale;
   } else {
     state.realNodes[i].y = val;
-    state.nodes[i].y = H - (val - state.baseElev) / state.scale;
+    state.nodes[i].y = datumPy - (val - state.baseElev) / state.scale;
   }
   redrawGeoCanvas();
 }
@@ -842,6 +892,8 @@ function loadSampleGeometry() {
     px(0, 80)   // crest upstream / heel top
   ];
   state.nodes = pts;
+  // Set datum line to the base node pixel y
+  state.datumPy = H_canvas - 10;
   computeRealNodes();
   redrawGeoCanvas();
   updateNodeTable();
@@ -1256,7 +1308,13 @@ function calcLoads(pts, p, caseKey) {
   const sumMV = vForces.reduce((s, f) => s + f.moment, 0); // moments from toe (stabilizing +)
   const sumMH = hForces.reduce((s, f) => s + f.moment, 0); // overturning moments
 
-  return { vForces, hForces, sumV, sumH, sumMV, sumMH, B, heel, toe, hd, td, W, cx, cy, area };
+  // Store uplift pressure intensities (psf) for drawing the trapezoidal diagram
+  const upliftPressures = { pH: pH * 1000, pT: pT * 1000 };
+  if (p.hasDrain && p.drainDist > 0 && p.drainDist < B) {
+    upliftPressures.pD = (pT + (1 - p.drainEff) * (pH - pT)) * 1000;
+    upliftPressures.drainX = heel + p.drainDist;
+  }
+  return { vForces, hForces, sumV, sumH, sumMV, sumMH, B, heel, toe, hd, td, W, cx, cy, area, upliftPressures };
 }
 
 // === STABILITY CHECKS ===
@@ -1445,15 +1503,95 @@ function drawLoadDiagram(res) {
     ctx.stroke();
   }
 
-  // Uplift arrows
-  const nArrows = 8;
-  for (let i = 0; i <= nArrows; i++) {
-    const xr = heel + B * i / nArrows;
-    const xp = px(xr);
-    const arrowLen = 22;
-    ctx.strokeStyle = '#c0392b';
-    ctx.lineWidth = 1.5;
-    arrow(ctx, xp, py(p.baseElev) + arrowLen, xp, py(p.baseElev), 5);
+  // Uplift pressure diagram (trapezoidal / triangular shape below base)
+  {
+    const { pH, pT, pD, drainX } = loads.upliftPressures || {};
+    const base = p.baseElev;
+    const diagScale = 0.035; // px per psf — scale pressure height in pixels
+    if (pH !== undefined) {
+      const heelPx = px(heel), toePx = px(toe);
+      const upliftH = pH * diagScale * s;   // pixel height at heel
+      const upliftT = pT * diagScale * s;   // pixel height at toe
+      const baseY = py(base);
+
+      if (p.hasDrain && drainX !== undefined) {
+        const drPx = px(drainX);
+        const upliftD = pD * diagScale * s;
+        // Fill heel→drain triangle/trap
+        ctx.beginPath();
+        ctx.moveTo(heelPx, baseY);
+        ctx.lineTo(heelPx, baseY + upliftH);
+        ctx.lineTo(drPx, baseY + upliftD);
+        ctx.lineTo(drPx, baseY);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(192,57,43,0.25)';
+        ctx.fill();
+        ctx.strokeStyle = '#c0392b';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        // Fill drain→toe
+        ctx.beginPath();
+        ctx.moveTo(drPx, baseY);
+        ctx.lineTo(drPx, baseY + upliftD);
+        ctx.lineTo(toePx, baseY + upliftT);
+        ctx.lineTo(toePx, baseY);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(192,57,43,0.18)';
+        ctx.fill();
+        ctx.strokeStyle = '#c0392b';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        // Drain marker
+        ctx.setLineDash([3,3]);
+        ctx.beginPath(); ctx.moveTo(drPx, baseY); ctx.lineTo(drPx, baseY + upliftD + 4); ctx.stroke();
+        ctx.setLineDash([]);
+      } else {
+        // Simple trapezoid heel→toe
+        ctx.beginPath();
+        ctx.moveTo(heelPx, baseY);
+        ctx.lineTo(heelPx, baseY + upliftH);
+        ctx.lineTo(toePx, baseY + upliftT);
+        ctx.lineTo(toePx, baseY);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(192,57,43,0.25)';
+        ctx.fill();
+        ctx.strokeStyle = '#c0392b';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+      // Pressure labels
+      ctx.fillStyle = '#c0392b';
+      ctx.font = '9px monospace';
+      ctx.textAlign = 'center';
+      if (upliftH > 10) ctx.fillText((pH / 1000).toFixed(2) + ' ksf', heelPx, baseY + upliftH + 10);
+      if (upliftT > 10) ctx.fillText((pT / 1000).toFixed(2) + ' ksf', toePx, baseY + upliftT + 10);
+      // Upward arrows at quarter points
+      const nArr = 5;
+      for (let i = 0; i <= nArr; i++) {
+        const frac = i / nArr;
+        const xp2 = heelPx + (toePx - heelPx) * frac;
+        let arrH;
+        if (p.hasDrain && drainX !== undefined) {
+          const drFrac = (drainX - heel) / B;
+          if (frac <= drFrac) {
+            arrH = upliftH + (upliftD - upliftH) * (frac / (drFrac || 0.001));
+          } else {
+            arrH = upliftD + (upliftT - upliftD) * ((frac - drFrac) / (1 - drFrac || 0.001));
+          }
+        } else {
+          arrH = upliftH + (upliftT - upliftH) * frac;
+        }
+        arrH = Math.min(arrH, 60);
+        if (arrH > 4) arrow(ctx, xp2, baseY + arrH * 0.5, xp2, baseY, 4);
+      }
+      // Label U
+      ctx.fillStyle = '#c0392b';
+      ctx.font = 'bold 10px monospace';
+      ctx.textAlign = 'center';
+      const upliftF = loads.vForces.find(f => f.label && f.label.includes('Uplift'));
+      if (upliftF) ctx.fillText('U=' + Math.abs(upliftF.F).toFixed(1) + ' k/ft', (heelPx + toePx) / 2, baseY + Math.max(upliftH, upliftT) * 0.5 + 16);
+      ctx.textAlign = 'left';
+    }
   }
 
   // Weight arrow (green, at centroid)
