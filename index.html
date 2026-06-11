@@ -1442,6 +1442,8 @@ function showLoadCase(idx) {
   const key = caseKeys[idx];
   const res = state.results[key];
   if (!res) return;
+  state.activeResultTab = key;
+  state.panOffset = { x: 0, y: 0 }; // reset pan when switching cases
   drawLoadDiagram(res);
   renderLoadTable(res);
 }
@@ -1472,14 +1474,9 @@ function drawLoadDiagram(res) {
   const px = x => ox + x * s;
   const py = y => oy - y * s;
 
-  // Unified pressure scale: map pressure (ksf) → pixels horizontal extent
-  // Choose scale so HW triangle width = roughly B * 0.45 canvas pixels for readability
-  const hwKsf = 0.5 * (p.waterUW || 62.4) * hd / 1000; // max HW pressure at base (ksf)
-  const pressScale = hwKsf > 0 ? (B * s * 0.45) / hwKsf : 30; // px per ksf
-
   // Water background upstream
   if (hd > 0) {
-    ctx.fillStyle = 'rgba(100,160,240,0.2)';
+    ctx.fillStyle = 'rgba(100,160,240,0.13)';
     ctx.fillRect(pad - 5, py(p[LOAD_CASES[res.caseKey].hwKey]), px(heel) - pad + 5, py(p.baseElev) - py(p[LOAD_CASES[res.caseKey].hwKey]));
   }
 
@@ -1487,268 +1484,267 @@ function drawLoadDiagram(res) {
   ctx.beginPath();
   pts.forEach((n, i) => i === 0 ? ctx.moveTo(px(n.x), py(n.y)) : ctx.lineTo(px(n.x), py(n.y)));
   ctx.closePath();
-  ctx.fillStyle = '#d4d4d4';
+  ctx.fillStyle = '#d0d0d0';
   ctx.fill();
-  ctx.strokeStyle = '#555';
+  ctx.strokeStyle = '#444';
   ctx.lineWidth = 2;
   ctx.stroke();
 
   // Base line
-  ctx.strokeStyle = '#888';
+  ctx.strokeStyle = '#666';
   ctx.lineWidth = 1;
+  ctx.setLineDash([6, 4]);
   ctx.beginPath();
   ctx.moveTo(pad - 20, py(p.baseElev));
   ctx.lineTo(W - pad + 20, py(p.baseElev));
   ctx.stroke();
+  ctx.setLineDash([]);
 
-  // Water pressure on upstream face (triangular)
-  if (hd > 0) {
-    const hw_el = p[LOAD_CASES[res.caseKey].hwKey];
-    ctx.beginPath();
-    ctx.moveTo(px(heel) - 5, py(p.baseElev));
-    ctx.lineTo(px(heel) - 5, py(hw_el));
-    ctx.lineTo(px(heel) - 5 - 30, py(p.baseElev));
-    ctx.closePath();
-    ctx.fillStyle = 'rgba(30,100,220,0.35)';
-    ctx.fill();
-    ctx.strokeStyle = '#1a6cc7';
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-  }
+  // === PRESSURE SCALE ===
+  // hwIntensity = pressure intensity at base (ksf), NOT the resultant force
+  // Triangle base width and uplift depth both use this same scale so they match.
+  const hwIntensity = (p.waterUW || 62.4) * hd / 1000;  // ksf at base (γ × h)
+  const pressScale = hwIntensity > 0 ? (B * s * 0.42) / hwIntensity : 40; // px per ksf
 
-  // Uplift pressure diagram (trapezoidal / triangular shape below base)
+  // === UPLIFT pressure diagram (trapezoid below base line) ===
+  // Use hwIntensity / twIntensity directly — same source as the HW/TW triangles —
+  // so the heel depth exactly equals the HW triangle base width and the toe depth
+  // exactly equals the TW triangle base width.
   {
     const { pH, pT, pD, drainX } = loads.upliftPressures || {};
-    const base = p.baseElev;
     if (pH !== undefined) {
       const heelPx = px(heel), toePx = px(toe);
-      // Use same pressure scale as HW/TW triangles (pressScale = px per ksf)
-      const upliftH = (pH / 1000) * pressScale;   // pixel depth at heel
-      const upliftT = (pT / 1000) * pressScale;   // pixel depth at toe
-      const baseY = py(base);
+      const twIntensityLocal = (p.waterUW || 62.4) * td / 1000; // ksf at toe
+      const upliftH = hwIntensity  * pressScale;   // pixel depth at heel — matches HW triangle base width
+      const upliftT = twIntensityLocal * pressScale; // pixel depth at toe  — matches TW triangle base width
+      const baseY   = py(p.baseElev);
+
+      const drawUpliftTrap = (x1, y1, x2, y2, alpha) => {
+        ctx.beginPath();
+        ctx.moveTo(x1, baseY);
+        ctx.lineTo(x1, baseY + y1);
+        ctx.lineTo(x2, baseY + y2);
+        ctx.lineTo(x2, baseY);
+        ctx.closePath();
+        ctx.fillStyle = `rgba(192,57,43,${alpha})`;
+        ctx.fill();
+        ctx.strokeStyle = '#c0392b';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      };
 
       if (p.hasDrain && drainX !== undefined) {
-        const drPx = px(drainX);
+        const drPx  = px(drainX);
         const upliftD = (pD / 1000) * pressScale;
-        // Fill heel→drain triangle/trap
-        ctx.beginPath();
-        ctx.moveTo(heelPx, baseY);
-        ctx.lineTo(heelPx, baseY + upliftH);
-        ctx.lineTo(drPx, baseY + upliftD);
-        ctx.lineTo(drPx, baseY);
-        ctx.closePath();
-        ctx.fillStyle = 'rgba(192,57,43,0.25)';
-        ctx.fill();
-        ctx.strokeStyle = '#c0392b';
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-        // Fill drain→toe
-        ctx.beginPath();
-        ctx.moveTo(drPx, baseY);
-        ctx.lineTo(drPx, baseY + upliftD);
-        ctx.lineTo(toePx, baseY + upliftT);
-        ctx.lineTo(toePx, baseY);
-        ctx.closePath();
-        ctx.fillStyle = 'rgba(192,57,43,0.18)';
-        ctx.fill();
-        ctx.strokeStyle = '#c0392b';
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-        // Drain marker
+        drawUpliftTrap(heelPx, upliftH, drPx, upliftD, 0.25);
+        drawUpliftTrap(drPx, upliftD, toePx, upliftT, 0.18);
+        // Drain marker on uplift
         ctx.setLineDash([3,3]);
-        ctx.beginPath(); ctx.moveTo(drPx, baseY); ctx.lineTo(drPx, baseY + upliftD + 4); ctx.stroke();
+        ctx.strokeStyle = '#c0392b'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(drPx, baseY); ctx.lineTo(drPx, baseY + upliftD + 8); ctx.stroke();
         ctx.setLineDash([]);
+        // pD label
+        ctx.fillStyle = '#c0392b'; ctx.font = '9px monospace'; ctx.textAlign = 'center';
+        ctx.fillText((pD/1000).toFixed(2)+' ksf', drPx, baseY + upliftD + 18);
       } else {
-        // Simple trapezoid heel→toe
-        ctx.beginPath();
-        ctx.moveTo(heelPx, baseY);
-        ctx.lineTo(heelPx, baseY + upliftH);
-        ctx.lineTo(toePx, baseY + upliftT);
-        ctx.lineTo(toePx, baseY);
-        ctx.closePath();
-        ctx.fillStyle = 'rgba(192,57,43,0.25)';
-        ctx.fill();
-        ctx.strokeStyle = '#c0392b';
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
+        drawUpliftTrap(heelPx, upliftH, toePx, upliftT, 0.25);
       }
-      // Pressure labels
-      ctx.fillStyle = '#c0392b';
-      ctx.font = '9px monospace';
-      ctx.textAlign = 'center';
-      if (upliftH > 10) ctx.fillText((pH / 1000).toFixed(2) + ' ksf', heelPx, baseY + upliftH + 10);
-      if (upliftT > 10) ctx.fillText((pT / 1000).toFixed(2) + ' ksf', toePx, baseY + upliftT + 10);
-      // Upward arrows at quarter points
-      const nArr = 5;
+
+      // Pressure labels at heel and toe (use same intensities as the triangles)
+      ctx.fillStyle = '#c0392b'; ctx.font = '9px monospace'; ctx.textAlign = 'center';
+      ctx.fillText(hwIntensity.toFixed(2)+' ksf', heelPx, baseY + upliftH + 13);
+      if (upliftT > 4) ctx.fillText(twIntensityLocal.toFixed(2)+' ksf', toePx, baseY + upliftT + 13);
+
+      // Upward arrows sized to local pressure depth
+      const nArr = 6;
       for (let i = 0; i <= nArr; i++) {
         const frac = i / nArr;
         const xp2 = heelPx + (toePx - heelPx) * frac;
         let arrH;
         if (p.hasDrain && drainX !== undefined) {
           const drFrac = (drainX - heel) / B;
-          if (frac <= drFrac) {
-            arrH = upliftH + (upliftD - upliftH) * (frac / (drFrac || 0.001));
-          } else {
-            arrH = upliftD + (upliftT - upliftD) * ((frac - drFrac) / (1 - drFrac || 0.001));
-          }
+          const upliftD = (pD / 1000) * pressScale;
+          arrH = frac <= drFrac
+            ? upliftH + (upliftD - upliftH) * (frac / (drFrac || 0.001))
+            : upliftD + (upliftT - upliftD) * ((frac - drFrac) / ((1 - drFrac) || 0.001));
         } else {
           arrH = upliftH + (upliftT - upliftH) * frac;
         }
-        arrH = Math.min(arrH, 60);
-        if (arrH > 4) arrow(ctx, xp2, baseY + arrH * 0.5, xp2, baseY, 4);
+        if (arrH > 6) {
+          ctx.strokeStyle = '#c0392b'; ctx.lineWidth = 1.2;
+          arrow(ctx, xp2, baseY + arrH * 0.55, xp2, baseY, 4);
+        }
       }
-      // Label U
-      ctx.fillStyle = '#c0392b';
-      ctx.font = 'bold 10px monospace';
-      ctx.textAlign = 'center';
+
+      // Resultant label
       const upliftF = loads.vForces.find(f => f.label && f.label.includes('Uplift'));
-      if (upliftF) ctx.fillText('U=' + Math.abs(upliftF.F).toFixed(1) + ' k/ft', (heelPx + toePx) / 2, baseY + Math.max(upliftH, upliftT) * 0.5 + 16);
+      if (upliftF) {
+        const midX = (heelPx + toePx) / 2;
+        const midDepth = (upliftH + upliftT) / 2;
+        ctx.fillStyle = '#c0392b'; ctx.font = 'bold 11px monospace'; ctx.textAlign = 'center';
+        ctx.fillText('U = ' + Math.abs(upliftF.F).toFixed(1) + ' k/ft', midX, baseY + midDepth * 0.5 + 14);
+      }
       ctx.textAlign = 'left';
     }
   }
 
-  // Weight arrow (green, at centroid)
-  const cx = loads.cx, cy = loads.cy;
-  const arrowScale = 50;
-  ctx.strokeStyle = '#1a7a3a';
-  ctx.lineWidth = 3;
-  arrow(ctx, px(cx), py(cy), px(cx), py(cy) - arrowScale, 9);
-  ctx.fillStyle = '#1a7a3a';
-  ctx.font = 'bold 11px monospace';
-  ctx.textAlign = 'center';
-  ctx.fillText('W=' + weight.toFixed(0) + ' k/ft', px(cx), py(cy) - arrowScale - 6);
-  ctx.textAlign = 'left';
-
-  // HW pressure triangle (upstream side — extends LEFT from heel)
-  if (hd > 0) {
-    const hwPressureBase = hwKsf * pressScale; // pixel width at base (max pressure)
-    const baseY = py(p.baseElev);
-    const topY = py(p.baseElev + hd);           // water surface
-    const heelX = px(heel);
-    // Triangle: tip at water surface (pressure=0), base at dam base (max pressure)
-    ctx.beginPath();
-    ctx.moveTo(heelX, topY);                     // tip (zero pressure at surface)
-    ctx.lineTo(heelX - hwPressureBase, baseY);   // max pressure at base, extending left
-    ctx.lineTo(heelX, baseY);                    // base of dam face
-    ctx.closePath();
-    ctx.fillStyle = 'rgba(26,108,199,0.20)';
-    ctx.fill();
-    ctx.strokeStyle = '#1a6cc7';
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-    // Baseline at bottom of triangle
-    ctx.beginPath();
-    ctx.moveTo(heelX - hwPressureBase - 6, baseY);
-    ctx.lineTo(heelX, baseY);
-    ctx.strokeStyle = '#1a6cc7';
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    // Resultant arrow at hd/3 from base
-    const yRes = py(p.baseElev + hd / 3);
-    const resWidth = (hd / 3) / hd * hwPressureBase; // pressure at hd/3 height
-    ctx.strokeStyle = '#1a6cc7'; ctx.lineWidth = 2.5;
-    arrow(ctx, heelX - resWidth - 18, yRes, heelX, yRes, 8);
-    // Labels
-    ctx.fillStyle = '#1a6cc7';
-    ctx.font = 'bold 10px monospace';
-    ctx.textAlign = 'right';
-    const FHW = loads.hForces.find(f => f.label.includes('Headwater'));
-    if (FHW) ctx.fillText('HW=' + FHW.F.toFixed(1) + ' k/ft', heelX - hwPressureBase - 10, yRes - 4);
-    ctx.font = '9px monospace';
-    ctx.fillText((hwKsf).toFixed(2) + ' ksf', heelX - hwPressureBase - 4, baseY - 4);
+  // === WEIGHT arrow (green, from centroid downward) ===
+  {
+    const cx = loads.cx, cy = loads.cy;
+    const aLen = Math.min(py(p.baseElev) - py(cy) - 10, 70); // arrow length
+    ctx.strokeStyle = '#1a7a3a'; ctx.lineWidth = 3;
+    arrow(ctx, px(cx), py(cy) + aLen * 0.3, px(cx), py(cy) - aLen * 0.7, 10);
+    ctx.fillStyle = '#1a7a3a'; ctx.font = 'bold 11px monospace'; ctx.textAlign = 'center';
+    ctx.fillText('W = ' + weight.toFixed(1) + ' k/ft', px(cx), py(cy) - aLen * 0.7 - 7);
     ctx.textAlign = 'left';
   }
 
-  // TW pressure triangle (downstream side — extends RIGHT from toe)
+  // === HW pressure triangle (extends LEFT from heel) ===
+  if (hd > 0) {
+    const heelX  = px(heel);
+    const baseY  = py(p.baseElev);
+    const topY   = py(p.baseElev + hd);           // water surface (zero pressure)
+    const triW   = hwIntensity * pressScale;       // pixel width at base = γ×hd × scale
+
+    // Triangle: zero at top, max at base
+    ctx.beginPath();
+    ctx.moveTo(heelX, topY);                       // tip at waterline
+    ctx.lineTo(heelX - triW, baseY);               // max pressure at base
+    ctx.lineTo(heelX, baseY);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(26,108,199,0.22)';
+    ctx.fill();
+    ctx.strokeStyle = '#1a6cc7'; ctx.lineWidth = 1.8;
+    ctx.stroke();
+
+    // Baseline tick
+    ctx.beginPath();
+    ctx.moveTo(heelX - triW, baseY - 4);
+    ctx.lineTo(heelX - triW, baseY + 4);
+    ctx.strokeStyle = '#1a6cc7'; ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Resultant arrow at h/3 from base (pressure there = γ × 2h/3, width = 2/3 × triW)
+    const yRes    = py(p.baseElev + hd / 3);
+    const resW    = (2 / 3) * triW;   // width of triangle at h/3 from base
+    ctx.strokeStyle = '#1a6cc7'; ctx.lineWidth = 2.5;
+    ctx.fillStyle   = '#1a6cc7';
+    arrow(ctx, heelX - resW - 20, yRes, heelX, yRes, 9);
+
+    // Labels
+    ctx.font = 'bold 11px monospace'; ctx.textAlign = 'right';
+    const FHW = loads.hForces.find(f => f.label.includes('Headwater'));
+    if (FHW) ctx.fillText('HW = ' + FHW.F.toFixed(1) + ' k/ft', heelX - resW - 24, yRes - 5);
+    ctx.font = '9px monospace';
+    ctx.fillText(hwIntensity.toFixed(2) + ' ksf', heelX - triW - 4, baseY + 12);
+    ctx.textAlign = 'left';
+  }
+
+  // === TW pressure triangle (extends RIGHT from toe) ===
   if (td > 0) {
-    const twKsf = 0.5 * (p.waterUW || 62.4) * td / 1000;
-    const twPressureBase = twKsf * pressScale;
-    const baseY = py(p.baseElev);
-    const topY = py(p.baseElev + td);
-    const toeX = px(toe);
+    const toeX    = px(toe);
+    const baseY   = py(p.baseElev);
+    const topY    = py(p.baseElev + td);
+    const twIntensity = (p.waterUW || 62.4) * td / 1000;
+    const triW    = twIntensity * pressScale;
+
     ctx.beginPath();
     ctx.moveTo(toeX, topY);
-    ctx.lineTo(toeX + twPressureBase, baseY);
+    ctx.lineTo(toeX + triW, baseY);
     ctx.lineTo(toeX, baseY);
     ctx.closePath();
     ctx.fillStyle = 'rgba(85,153,221,0.22)';
     ctx.fill();
-    ctx.strokeStyle = '#5599dd';
-    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = '#5599dd'; ctx.lineWidth = 1.8;
     ctx.stroke();
-    // Baseline
+
+    // Baseline tick
     ctx.beginPath();
-    ctx.moveTo(toeX, baseY);
-    ctx.lineTo(toeX + twPressureBase + 6, baseY);
-    ctx.strokeStyle = '#5599dd'; ctx.lineWidth = 1;
+    ctx.moveTo(toeX + triW, baseY - 4);
+    ctx.lineTo(toeX + triW, baseY + 4);
+    ctx.strokeStyle = '#5599dd'; ctx.lineWidth = 1.5;
     ctx.stroke();
+
     // Resultant arrow at td/3 from base
     const yRes = py(p.baseElev + td / 3);
-    const resWidth = (td / 3) / td * twPressureBase;
+    const resW = (2 / 3) * triW;
     ctx.strokeStyle = '#5599dd'; ctx.lineWidth = 2;
-    arrow(ctx, toeX + resWidth + 18, yRes, toeX, yRes, 7);
-    ctx.fillStyle = '#5599dd';
-    ctx.font = 'bold 10px monospace';
-    ctx.textAlign = 'left';
+    ctx.fillStyle   = '#5599dd';
+    arrow(ctx, toeX + resW + 20, yRes, toeX, yRes, 8);
+
+    ctx.font = 'bold 11px monospace'; ctx.textAlign = 'left';
     const FTW = loads.hForces.find(f => f.label.includes('Tailwater'));
-    if (FTW) ctx.fillText('TW=' + Math.abs(FTW.F).toFixed(1) + ' k/ft', toeX + twPressureBase + 10, yRes - 4);
+    if (FTW) ctx.fillText('TW = ' + Math.abs(FTW.F).toFixed(1) + ' k/ft', toeX + resW + 24, yRes - 5);
     ctx.font = '9px monospace';
-    ctx.fillText((twKsf).toFixed(2) + ' ksf', toeX + twPressureBase + 4, baseY - 4);
+    ctx.fillText(twIntensity.toFixed(2) + ' ksf', toeX + triW + 4, baseY + 12);
     ctx.textAlign = 'left';
   }
 
-  // Seismic arrow
+  // === SEISMIC arrow ===
   const eqF = loads.hForces.find(f => f.label.includes('Seismic'));
   if (eqF) {
-    ctx.strokeStyle = '#7b2fbe';
-    ctx.lineWidth = 2.5;
-    const ySeis = py(loads.cy);
-    arrow(ctx, px(heel) - 35, ySeis, px(cx), ySeis, 8);
-    ctx.fillStyle = '#7b2fbe';
-    ctx.font = '10px monospace';
-    ctx.textAlign = 'right';
-    ctx.fillText('EQ=' + eqF.F.toFixed(1) + ' k/ft', px(heel) - 37, ySeis - 4);
+    const cx   = loads.cx, cy = loads.cy;
+    const ySeis = py(cy);
+    ctx.strokeStyle = '#7b2fbe'; ctx.fillStyle = '#7b2fbe'; ctx.lineWidth = 2.5;
+    arrow(ctx, px(heel) - 40, ySeis, px(heel), ySeis, 9);
+    ctx.font = 'bold 11px monospace'; ctx.textAlign = 'right';
+    ctx.fillText('EQ = ' + eqF.F.toFixed(1) + ' k/ft', px(heel) - 44, ySeis - 5);
     ctx.textAlign = 'left';
   }
 
-  // Drain line
+  // === SILT loads ===
+  const siltF = loads.hForces.find(f => f.label.includes('Silt') || f.label.includes('silt'));
+  if (siltF) {
+    const ySilt = py(p.baseElev + (p.siltUpElev - p.baseElev) / 3);
+    ctx.strokeStyle = '#8B6914'; ctx.fillStyle = '#8B6914'; ctx.lineWidth = 2;
+    arrow(ctx, px(heel) - 30, ySilt, px(heel), ySilt, 7);
+    ctx.font = 'bold 10px monospace'; ctx.textAlign = 'right';
+    ctx.fillText('S = ' + siltF.F.toFixed(1) + ' k/ft', px(heel) - 34, ySilt - 4);
+    ctx.textAlign = 'left';
+  }
+
+  // === DRAIN line ===
   if (p.hasDrain) {
     const dr = heel + p.drainDist;
-    ctx.strokeStyle = '#888';
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = '#888'; ctx.lineWidth = 1;
     ctx.setLineDash([3, 3]);
     ctx.beginPath();
     ctx.moveTo(px(dr), py(p.baseElev));
-    ctx.lineTo(px(dr), py(p.baseElev) + 35);
+    ctx.lineTo(px(dr), py(p.baseElev) + 40);
     ctx.stroke();
     ctx.setLineDash([]);
-    ctx.fillStyle = '#888';
-    ctx.font = '9px system-ui';
-    ctx.textAlign = 'center';
-    ctx.fillText('drain', px(dr), py(p.baseElev) + 44);
+    ctx.fillStyle = '#888'; ctx.font = '9px system-ui'; ctx.textAlign = 'center';
+    ctx.fillText('drain', px(dr), py(p.baseElev) + 52);
     ctx.textAlign = 'left';
   }
 
-  // HW/TW labels
+  // === ELEVATION labels ===
   const hw_key = LOAD_CASES[res.caseKey].hwKey;
-  ctx.fillStyle = '#1a6cc7';
-  ctx.font = '11px system-ui';
-  ctx.setLineDash([5, 4]);
-  ctx.strokeStyle = '#1a6cc7';
-  ctx.lineWidth = 1;
+  ctx.fillStyle = '#1a6cc7'; ctx.font = '11px system-ui';
+  ctx.setLineDash([5, 4]); ctx.strokeStyle = '#1a6cc7'; ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(pad - 10, py(p[hw_key]));
   ctx.lineTo(px(heel), py(p[hw_key]));
   ctx.stroke();
   ctx.setLineDash([]);
-  ctx.fillText('EL ' + p[hw_key].toFixed(0) + ' ft', pad - 8, py(p[hw_key]) - 3);
+  ctx.fillText('EL ' + p[hw_key].toFixed(0) + ' ft (HW)', pad - 8, py(p[hw_key]) - 3);
 
-  // Labels
-  ctx.fillStyle = '#555';
-  ctx.font = '11px system-ui';
-  ctx.textAlign = 'center';
+  if (td > 0) {
+    const tw_key = LOAD_CASES[res.caseKey].twKey;
+    ctx.fillStyle = '#5599dd'; ctx.font = '11px system-ui';
+    ctx.setLineDash([5, 4]); ctx.strokeStyle = '#5599dd'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(px(toe), py(p[tw_key]));
+    ctx.lineTo(W - pad + 10, py(p[tw_key]));
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillText('EL ' + p[tw_key].toFixed(0) + ' ft (TW)', px(toe) + 4, py(p[tw_key]) - 3);
+  }
+
+  // === BASE labels ===
+  ctx.fillStyle = '#444'; ctx.font = '11px system-ui'; ctx.textAlign = 'center';
   ctx.fillText('Heel', px(heel), py(p.baseElev) + 16);
-  ctx.fillText('Toe', px(toe), py(p.baseElev) + 16);
+  ctx.fillText('Toe',  px(toe),  py(p.baseElev) + 16);
   ctx.fillText('B = ' + B.toFixed(1) + ' ft', px((heel + toe) / 2), py(p.baseElev) + 28);
   ctx.textAlign = 'left';
 }
@@ -1768,7 +1764,8 @@ function togglePan() {
 }
 function resetPan() {
   state.panOffset = { x: 0, y: 0 };
-  if (state.results?.length) drawLoadDiagram(state.results.find(r => r.caseKey === state.activeResultTab) || state.results[0]);
+  const _rr = state.results?.[state.activeResultTab] || state.results?.['usual'];
+  if (_rr) { drawLoadDiagram(_rr); renderLoadTable(_rr); }
 }
 function initLoadCanvasPan() {
   const lc = document.getElementById('loadCanvas');
@@ -1782,7 +1779,8 @@ function initLoadCanvasPan() {
     if (!state.panMode || !state.panDragging) return;
     state.panOffset.x = e.clientX - state.panStart.x;
     state.panOffset.y = e.clientY - state.panStart.y;
-    if (state.results?.length) drawLoadDiagram(state.results.find(r => r.caseKey === state.activeResultTab) || state.results[0]);
+    const _pr = state.results?.[state.activeResultTab] || state.results?.['usual'];
+    if (_pr) { drawLoadDiagram(_pr); renderLoadTable(_pr); }
   });
   lc.addEventListener('mouseup', () => { state.panDragging = false; if (state.panMode) document.getElementById('loadCanvas').style.cursor = 'grab'; });
   lc.addEventListener('mouseleave', () => { state.panDragging = false; });
@@ -2022,9 +2020,21 @@ function generateReport() {
   const p = getParams();
   const caseKeys = ['usual', 'flood', 'seismic', 'extreme'];
 
-  // Capture canvas images
+  // Capture geometry figure
+  updateGeoFig();
   const geoFigImg = document.getElementById('geoFigCanvas').toDataURL();
-  const loadImg = document.getElementById('loadCanvas').toDataURL();
+
+  // Capture load diagrams for all 4 cases
+  const loadImgs = {};
+  ['usual','flood','seismic','extreme'].forEach(key => {
+    if (state.results[key]) {
+      drawLoadDiagram(state.results[key]);
+      loadImgs[key] = document.getElementById('loadCanvas').toDataURL();
+    }
+  });
+  // Restore active case
+  const activeRes = state.results[state.activeResultTab] || state.results['usual'];
+  if (activeRes) drawLoadDiagram(activeRes);
 
   let resultRows = '';
   caseKeys.forEach(key => {
@@ -2130,10 +2140,12 @@ img{max-width:100%;border:1pt solid #ccc;border-radius:4pt;margin:8pt 0}
   </table>
 </div>
 
-<h2>3. Load Diagram</h2>
-<div class="section">
-  <img src="${loadImg}" alt="Load Diagram">
-</div>
+<h2>3. Load Diagrams</h2>
+${['usual','flood','seismic','extreme'].filter(k => loadImgs[k]).map(k => `
+<div class="section" style="page-break-inside:avoid;margin-bottom:18px">
+  <h3 style="font-size:13px;margin-bottom:6px">${LOAD_CASES[k].label}</h3>
+  <img src="${loadImgs[k]}" alt="Load Diagram — ${LOAD_CASES[k].label}" style="max-width:100%;border:1px solid #ddd;border-radius:4px">
+</div>`).join('')}
 
 <h2>4. Stability Results Summary</h2>
 <div class="section">
