@@ -350,9 +350,11 @@ canvas{display:block;border:1px solid #e0e0e0;border-radius:8px;background:#fff}
   <div class="ctabs" id="loadCaseTabs"></div>
   <div id="loadCanvasArea" class="card">
     <div class="card-title">Load Diagram</div>
-    <canvas id="loadCanvas" width="700" height="340" style="width:100%"></canvas>
-    <div class="note" style="margin-top:4px">
-      W=weight (green&#8595;) &nbsp;|&nbsp; HW=headwater (blue) &nbsp;|&nbsp; TW=tailwater (blue, opposing) &nbsp;|&nbsp; U=uplift (red&#8593;) &nbsp;|&nbsp; S=silt (brown) &nbsp;|&nbsp; EQ=seismic (purple)
+    <canvas id="loadCanvas" width="700" height="420" style="width:100%;cursor:grab"></canvas>
+    <div style="margin-top:4px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <button class="btn btn-sm" id="panBtn" onclick="togglePan()" title="Pan the diagram">&#9995; Pan</button>
+      <button class="btn btn-sm" onclick="resetPan()" title="Reset view">&#8635; Reset</button>
+      <span class="note">W=weight (green&#8595;) &nbsp;|&nbsp; HW/TW=water pressure (blue triangles) &nbsp;|&nbsp; U=uplift (red&#8593;) &nbsp;|&nbsp; EQ=seismic (purple)</span>
     </div>
   </div>
   <div class="card" id="loadTableArea">
@@ -441,7 +443,12 @@ const state = {
   dragging: null,     // index of node being dragged
   datumPy: null,      // canvas pixel y of datum line (null = use bottom of canvas)
   results: [],
-  analysisRan: false
+  analysisRan: false,
+  // Load canvas pan
+  panMode: false,
+  panOffset: { x: 0, y: 0 },
+  panDragging: false,
+  panStart: { x: 0, y: 0 }
 };
 
 // === TAB SWITCHING ===
@@ -1448,21 +1455,27 @@ function drawLoadDiagram(res) {
   const pts = state.realNodes;
   const { loads, p } = res;
   const { heel, toe, hd, td, B, W: weight, sumV, sumH } = loads;
-  const pad = 55;
+  const pad = 60;
 
   const allX = pts.map(n => n.x), allY = pts.map(n => n.y);
-  const minX = Math.min(...allX) - B * 0.4;
-  const maxX = Math.max(...allX) + B * 0.15;
+  const minX = Math.min(...allX) - B * 0.55;
+  const maxX = Math.max(...allX) + B * 0.35;
   const minY = p.baseElev - 5;
   const maxY = Math.max(...allY, p.hwNormal, p.hwFlood) + 10;
 
   const sx = (W - 2 * pad) / (maxX - minX);
   const sy = (H - 2 * pad) / (maxY - minY);
   const s = Math.min(sx, sy);
-  const ox = pad - minX * s;
-  const oy = H - pad + minY * s;
+  // Apply pan offset
+  const ox = pad - minX * s + state.panOffset.x;
+  const oy = H - pad + minY * s + state.panOffset.y;
   const px = x => ox + x * s;
   const py = y => oy - y * s;
+
+  // Unified pressure scale: map pressure (ksf) → pixels horizontal extent
+  // Choose scale so HW triangle width = roughly B * 0.45 canvas pixels for readability
+  const hwKsf = 0.5 * (p.waterUW || 62.4) * hd / 1000; // max HW pressure at base (ksf)
+  const pressScale = hwKsf > 0 ? (B * s * 0.45) / hwKsf : 30; // px per ksf
 
   // Water background upstream
   if (hd > 0) {
@@ -1507,16 +1520,16 @@ function drawLoadDiagram(res) {
   {
     const { pH, pT, pD, drainX } = loads.upliftPressures || {};
     const base = p.baseElev;
-    const diagScale = 0.035; // px per psf — scale pressure height in pixels
     if (pH !== undefined) {
       const heelPx = px(heel), toePx = px(toe);
-      const upliftH = pH * diagScale * s;   // pixel height at heel
-      const upliftT = pT * diagScale * s;   // pixel height at toe
+      // Use same pressure scale as HW/TW triangles (pressScale = px per ksf)
+      const upliftH = (pH / 1000) * pressScale;   // pixel depth at heel
+      const upliftT = (pT / 1000) * pressScale;   // pixel depth at toe
       const baseY = py(base);
 
       if (p.hasDrain && drainX !== undefined) {
         const drPx = px(drainX);
-        const upliftD = pD * diagScale * s;
+        const upliftD = (pD / 1000) * pressScale;
         // Fill heel→drain triangle/trap
         ctx.beginPath();
         ctx.moveTo(heelPx, baseY);
@@ -1606,31 +1619,82 @@ function drawLoadDiagram(res) {
   ctx.fillText('W=' + weight.toFixed(0) + ' k/ft', px(cx), py(cy) - arrowScale - 6);
   ctx.textAlign = 'left';
 
-  // HW force arrow
+  // HW pressure triangle (upstream side — extends LEFT from heel)
   if (hd > 0) {
+    const hwPressureBase = hwKsf * pressScale; // pixel width at base (max pressure)
+    const baseY = py(p.baseElev);
+    const topY = py(p.baseElev + hd);           // water surface
+    const heelX = px(heel);
+    // Triangle: tip at water surface (pressure=0), base at dam base (max pressure)
+    ctx.beginPath();
+    ctx.moveTo(heelX, topY);                     // tip (zero pressure at surface)
+    ctx.lineTo(heelX - hwPressureBase, baseY);   // max pressure at base, extending left
+    ctx.lineTo(heelX, baseY);                    // base of dam face
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(26,108,199,0.20)';
+    ctx.fill();
     ctx.strokeStyle = '#1a6cc7';
-    ctx.lineWidth = 2.5;
-    const yHW = py(p.baseElev + hd / 3);
-    arrow(ctx, px(heel) - 45, yHW, px(heel), yHW, 8);
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    // Baseline at bottom of triangle
+    ctx.beginPath();
+    ctx.moveTo(heelX - hwPressureBase - 6, baseY);
+    ctx.lineTo(heelX, baseY);
+    ctx.strokeStyle = '#1a6cc7';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    // Resultant arrow at hd/3 from base
+    const yRes = py(p.baseElev + hd / 3);
+    const resWidth = (hd / 3) / hd * hwPressureBase; // pressure at hd/3 height
+    ctx.strokeStyle = '#1a6cc7'; ctx.lineWidth = 2.5;
+    arrow(ctx, heelX - resWidth - 18, yRes, heelX, yRes, 8);
+    // Labels
     ctx.fillStyle = '#1a6cc7';
-    ctx.font = '10px monospace';
+    ctx.font = 'bold 10px monospace';
     ctx.textAlign = 'right';
-    ctx.fillText('HW=' + loads.hForces.find(f => f.label.includes('Headwater'))?.F.toFixed(1) + ' k/ft', px(heel) - 47, yHW - 4);
+    const FHW = loads.hForces.find(f => f.label.includes('Headwater'));
+    if (FHW) ctx.fillText('HW=' + FHW.F.toFixed(1) + ' k/ft', heelX - hwPressureBase - 10, yRes - 4);
+    ctx.font = '9px monospace';
+    ctx.fillText((hwKsf).toFixed(2) + ' ksf', heelX - hwPressureBase - 4, baseY - 4);
     ctx.textAlign = 'left';
   }
 
-  // TW force arrow
+  // TW pressure triangle (downstream side — extends RIGHT from toe)
   if (td > 0) {
+    const twKsf = 0.5 * (p.waterUW || 62.4) * td / 1000;
+    const twPressureBase = twKsf * pressScale;
+    const baseY = py(p.baseElev);
+    const topY = py(p.baseElev + td);
+    const toeX = px(toe);
+    ctx.beginPath();
+    ctx.moveTo(toeX, topY);
+    ctx.lineTo(toeX + twPressureBase, baseY);
+    ctx.lineTo(toeX, baseY);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(85,153,221,0.22)';
+    ctx.fill();
+    ctx.strokeStyle = '#5599dd';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    // Baseline
+    ctx.beginPath();
+    ctx.moveTo(toeX, baseY);
+    ctx.lineTo(toeX + twPressureBase + 6, baseY);
+    ctx.strokeStyle = '#5599dd'; ctx.lineWidth = 1;
+    ctx.stroke();
+    // Resultant arrow at td/3 from base
+    const yRes = py(p.baseElev + td / 3);
+    const resWidth = (td / 3) / td * twPressureBase;
+    ctx.strokeStyle = '#5599dd'; ctx.lineWidth = 2;
+    arrow(ctx, toeX + resWidth + 18, yRes, toeX, yRes, 7);
+    ctx.fillStyle = '#5599dd';
+    ctx.font = 'bold 10px monospace';
+    ctx.textAlign = 'left';
     const FTW = loads.hForces.find(f => f.label.includes('Tailwater'));
-    if (FTW) {
-      ctx.strokeStyle = '#5599dd';
-      ctx.lineWidth = 2;
-      const yTW = py(p.baseElev + td / 3);
-      arrow(ctx, px(toe) + 40, yTW, px(toe), yTW, 8);
-      ctx.fillStyle = '#5599dd';
-      ctx.font = '10px monospace';
-      ctx.fillText('TW=' + Math.abs(FTW.F).toFixed(1) + ' k/ft', px(toe) + 6, yTW - 4);
-    }
+    if (FTW) ctx.fillText('TW=' + Math.abs(FTW.F).toFixed(1) + ' k/ft', toeX + twPressureBase + 10, yRes - 4);
+    ctx.font = '9px monospace';
+    ctx.fillText((twKsf).toFixed(2) + ' ksf', toeX + twPressureBase + 4, baseY - 4);
+    ctx.textAlign = 'left';
   }
 
   // Seismic arrow
@@ -1687,6 +1751,41 @@ function drawLoadDiagram(res) {
   ctx.fillText('Toe', px(toe), py(p.baseElev) + 16);
   ctx.fillText('B = ' + B.toFixed(1) + ' ft', px((heel + toe) / 2), py(p.baseElev) + 28);
   ctx.textAlign = 'left';
+}
+
+// === PAN SUPPORT FOR LOAD CANVAS ===
+function togglePan() {
+  state.panMode = !state.panMode;
+  const btn = document.getElementById('panBtn');
+  const lc = document.getElementById('loadCanvas');
+  if (state.panMode) {
+    btn.style.background = '#1a6cc7'; btn.style.color = '#fff';
+    lc.style.cursor = 'grab';
+  } else {
+    btn.style.background = ''; btn.style.color = '';
+    lc.style.cursor = 'default';
+  }
+}
+function resetPan() {
+  state.panOffset = { x: 0, y: 0 };
+  if (state.results?.length) drawLoadDiagram(state.results.find(r => r.caseKey === state.activeResultTab) || state.results[0]);
+}
+function initLoadCanvasPan() {
+  const lc = document.getElementById('loadCanvas');
+  lc.addEventListener('mousedown', e => {
+    if (!state.panMode) return;
+    state.panDragging = true;
+    state.panStart = { x: e.clientX - state.panOffset.x, y: e.clientY - state.panOffset.y };
+    lc.style.cursor = 'grabbing';
+  });
+  lc.addEventListener('mousemove', e => {
+    if (!state.panMode || !state.panDragging) return;
+    state.panOffset.x = e.clientX - state.panStart.x;
+    state.panOffset.y = e.clientY - state.panStart.y;
+    if (state.results?.length) drawLoadDiagram(state.results.find(r => r.caseKey === state.activeResultTab) || state.results[0]);
+  });
+  lc.addEventListener('mouseup', () => { state.panDragging = false; if (state.panMode) document.getElementById('loadCanvas').style.cursor = 'grab'; });
+  lc.addEventListener('mouseleave', () => { state.panDragging = false; });
 }
 
 function arrow(ctx, x1, y1, x2, y2, size) {
@@ -2084,9 +2183,9 @@ function init() {
   // Set default date
   document.getElementById('reportDate').value = new Date().toLocaleDateString('en-US');
   updateCodeDesc();
-  // Load sample geometry
   loadSampleGeometry();
   updateAIScanVisibility();
+  initLoadCanvasPan();
 }
 
 init();
